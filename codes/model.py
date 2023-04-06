@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 
 import logging
-import lstm
+# import lstm
 
 import numpy as np
 
@@ -18,6 +18,8 @@ from sklearn.metrics import average_precision_score
 from torch.utils.data import DataLoader
 
 from dataloader import TestDataset
+
+concatenated_tensor = torch.load('path_tensor.pt')
 
 
 class KGEModel(nn.Module):
@@ -44,12 +46,12 @@ class KGEModel(nn.Module):
         self.relation_dim = hidden_dim * 2 if double_relation_embedding else hidden_dim
 
         self.entity_embedding = nn.Parameter(torch.zeros(nentity, self.entity_dim))
-        #print(self.entity_embedding.size())
-        a = max(self.entity_dim, lstm.concatenated_tensor.size()[1])
+        # print(self.entity_embedding.size())
+        a = max(self.entity_dim, concatenated_tensor.size()[1])
         m = torch.zeros(nentity, a)
-        m[:lstm.concatenated_tensor.size()[0], :lstm.concatenated_tensor.size()[1]] = lstm.concatenated_tensor
+        m[:concatenated_tensor.size()[0], :concatenated_tensor.size()[1]] = concatenated_tensor
         self.entity_embedding = nn.Parameter(torch.cat([self.entity_embedding.data, m], dim=1))
-        #print(self.entity_embedding)
+        # print(self.entity_embedding)
         # self.entity_embedding = nn.Parameter(torch.cat([self.entity_embedding.data, lstm.concatenated_tensor], dim=1))
         nn.init.uniform_(
             tensor=self.entity_embedding,
@@ -58,19 +60,19 @@ class KGEModel(nn.Module):
         )
 
         self.relation_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
-        #print(self.relation_embedding.size())
+        # print(self.relation_embedding.size())
 
-        a = max(nrelation, lstm.concatenated_tensor.size()[0])
-        b = max(self.relation_dim, lstm.concatenated_tensor.size()[1])
-        #print(a)
-        #print(b)
+        a = max(nrelation, concatenated_tensor.size()[0])
+        b = max(self.relation_dim, concatenated_tensor.size()[1])
+        # print(a)
+        # print(b)
         # n = torch.zeros(lstm.concatenated_tensor.size()[0], self.relation_dim)
         n = torch.zeros(a, b)
         n[:nrelation, :self.relation_dim] = self.relation_embedding
-        #print(n.size())
-        self.relation_embedding = nn.Parameter(torch.cat([n, lstm.concatenated_tensor], dim=1))
+        # print(n.size())
+        self.relation_embedding = nn.Parameter(torch.cat([n, concatenated_tensor], dim=1))
         self.relation_embedding = nn.Parameter(
-            torch.cat([self.relation_embedding.data, lstm.concatenated_tensor], dim=1))
+            torch.cat([self.relation_embedding.data, concatenated_tensor], dim=1))
         nn.init.uniform_(
             tensor=self.relation_embedding,
             a=-self.embedding_range.item(),
@@ -100,7 +102,7 @@ class KGEModel(nn.Module):
         Because negative samples and positive samples usually share two elements 
         in their triple ((head, relation) or (relation, tail)).
         '''
-        #print(mode)
+        # print(mode)
         if mode == 'single':
             batch_size, negative_sample_size = sample.size(0), 1
             head = torch.index_select(
