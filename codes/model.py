@@ -18,8 +18,11 @@ from sklearn.metrics import average_precision_score
 from torch.utils.data import DataLoader
 
 from dataloader import TestDataset
+from lstm_new import PathLSTM
+from lstm_new import PathTransformer
+from lstm_new import PathDataset
 
-concatenated_tensor = torch.load('path_tensor.pt')
+path = torch.load('codes/path_tensor_wn18_part.pt')
 
 
 class KGEModel(nn.Module):
@@ -45,14 +48,29 @@ class KGEModel(nn.Module):
         self.entity_dim = hidden_dim * 2 if double_entity_embedding else hidden_dim
         self.relation_dim = hidden_dim * 2 if double_relation_embedding else hidden_dim
 
+        model = PathLSTM(len(path), self.entity_dim, self.hidden_dim)
+        dataset = PathDataset(path)
+        dataloader = DataLoader(dataset, batch_size=32)
+        model1 = PathTransformer(self.hidden_dim, self.hidden_dim, 6)
+        path1 = []
+        with torch.no_grad():
+            for paths in dataloader:
+                vectors = model(paths)
+                output = model1(vectors)
+                path1.append(output)
+        #6835
+        a = len(path1)-1
+        y = torch.zeros(32, 32)  # 创建一个形状为 [32, 32] 的空张量
+        y[:path1[a].size()[0], :path1[a].size()[1]] = path1[a]
+        path1[a] = y
+        path_embed = torch.stack(path1)
+        path_embedding = torch.mean(path_embed, dim=0)
+
         self.entity_embedding = nn.Parameter(torch.zeros(nentity, self.entity_dim))
-        # print(self.entity_embedding.size())
-        a = max(self.entity_dim, concatenated_tensor.size()[1])
-        m = torch.zeros(nentity, a)
-        m[:concatenated_tensor.size()[0], :concatenated_tensor.size()[1]] = concatenated_tensor
-        self.entity_embedding = nn.Parameter(torch.cat([self.entity_embedding.data, m], dim=1))
-        # print(self.entity_embedding)
-        # self.entity_embedding = nn.Parameter(torch.cat([self.entity_embedding.data, lstm.concatenated_tensor], dim=1))
+        a = max(self.entity_dim, path_embedding.size()[1])
+        m = torch.zeros(path_embedding.size()[0], a)
+        m[:path_embedding.size()[0], :path_embedding.size()[1]] = path_embedding
+        self.entity_embedding = nn.Parameter(torch.cat([self.entity_embedding, m], dim=0))
         nn.init.uniform_(
             tensor=self.entity_embedding,
             a=-self.embedding_range.item(),
@@ -60,19 +78,12 @@ class KGEModel(nn.Module):
         )
 
         self.relation_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
-        # print(self.relation_embedding.size())
-
-        a = max(nrelation, concatenated_tensor.size()[0])
-        b = max(self.relation_dim, concatenated_tensor.size()[1])
-        # print(a)
-        # print(b)
-        # n = torch.zeros(lstm.concatenated_tensor.size()[0], self.relation_dim)
+        self.relation_embedding.data = self.relation_embedding.data.cuda()
+        a = max(nrelation, path_embedding.size()[0])
+        b = max(self.relation_dim, path_embedding.size()[1])
         n = torch.zeros(a, b)
-        n[:nrelation, :self.relation_dim] = self.relation_embedding
-        # print(n.size())
-        self.relation_embedding = nn.Parameter(torch.cat([n, concatenated_tensor], dim=1))
-        self.relation_embedding = nn.Parameter(
-            torch.cat([self.relation_embedding.data, concatenated_tensor], dim=1))
+        n[:path_embedding.size()[0], :path_embedding.size()[1]] = path_embedding
+        self.relation_embedding = nn.Parameter(torch.cat([self.relation_embedding, n], dim=0))
         nn.init.uniform_(
             tensor=self.relation_embedding,
             a=-self.embedding_range.item(),
@@ -99,12 +110,13 @@ class KGEModel(nn.Module):
         In the 'head-batch' or 'tail-batch' mode, sample consists two part.
         The first part is usually the positive sample.
         And the second part is the entities in the negative samples.
-        Because negative samples and positive samples usually share two elements 
+        Because negative samples and positive samples usually share two elements
         in their triple ((head, relation) or (relation, tail)).
         '''
-        # print(mode)
+
         if mode == 'single':
             batch_size, negative_sample_size = sample.size(0), 1
+
             head = torch.index_select(
                 self.entity_embedding,
                 dim=0,
@@ -122,7 +134,6 @@ class KGEModel(nn.Module):
                 dim=0,
                 index=sample[:, 2]
             ).unsqueeze(1)
-
 
         elif mode == 'head-batch':
             tail_part, head_part = sample
@@ -146,7 +157,6 @@ class KGEModel(nn.Module):
                 index=tail_part[:, 2]
             ).unsqueeze(1)
 
-
         elif mode == 'tail-batch':
             head_part, tail_part = sample
             batch_size, negative_sample_size = tail_part.size(0), tail_part.size(1)
@@ -169,7 +179,6 @@ class KGEModel(nn.Module):
                 index=tail_part.view(-1)
             ).view(batch_size, negative_sample_size, -1)
 
-
         else:
             raise ValueError('mode %s not supported' % mode)
 
@@ -189,6 +198,18 @@ class KGEModel(nn.Module):
         return score
 
     def TransE(self, head, relation, tail, mode):
+        a = max(head.size()[0], tail.size()[0], relation.size()[0])
+        b = max(head.size()[1], tail.size()[1], relation.size()[1])
+        c = max(head.size()[2], tail.size()[2], relation.size()[2])
+        x = torch.zeros(a, b, c)
+        y = torch.zeros(a, b, c)
+        z = torch.zeros(a, b, c)
+        x[:head.size()[0], :head.size()[1], :head.size()[2]] = head
+        y[:relation.size()[0], :relation.size()[1], :relation.size()[2]] = relation
+        z[:tail.size()[0], :tail.size()[1], :tail.size()[2]] = tail
+        head = x
+        relation = y
+        tail = z
         if mode == 'head-batch':
             score = head + (relation - tail)
         else:
@@ -235,6 +256,22 @@ class KGEModel(nn.Module):
 
         re_relation = torch.cos(phase_relation)
         im_relation = torch.sin(phase_relation)
+
+        x = max(phase_relation.size(2), re_tail.size(2))
+        a = torch.zeros(re_relation.size()[0], re_relation.size()[1], x)
+        b = torch.zeros(im_relation.size()[0], im_relation.size()[1], x)
+
+        a[:re_relation.size()[0], :re_relation.size()[1], :re_relation.size()[2]] = re_relation
+        b[:im_relation.size()[0], :im_relation.size()[1], :im_relation.size()[2]] = im_relation
+
+        re_relation = a
+        im_relation = b
+        re_relation = re_relation.cuda()
+        im_relation = im_relation.cuda()
+        re_head = re_head.cuda()
+        im_head = im_head.cuda()
+        re_tail = re_tail.cuda()
+        im_tail = im_tail.cuda()
 
         if mode == 'head-batch':
             re_score = re_relation * re_tail + im_relation * im_tail
@@ -286,12 +323,9 @@ class KGEModel(nn.Module):
         positive_sample, negative_sample, subsampling_weight, mode = next(train_iterator)
 
         if args.cuda:
-            # positive_sample = positive_sample.cuda()
-            # negative_sample = negative_sample.cuda()
-            # subsampling_weight = subsampling_weight.cuda()
-            positive_sample = positive_sample.cpu()
-            negative_sample = negative_sample.cpu()
-            subsampling_weight = subsampling_weight.cpu()
+            positive_sample = positive_sample.cuda()
+            negative_sample = negative_sample.cuda()
+            subsampling_weight = subsampling_weight.cuda()
 
         negative_score = model((positive_sample, negative_sample), mode=mode)
 
@@ -411,15 +445,11 @@ class KGEModel(nn.Module):
                 for test_dataset in test_dataset_list:
                     for positive_sample, negative_sample, filter_bias, mode in test_dataset:
                         if args.cuda:
-                            # positive_sample = positive_sample.cuda()
-                            # negative_sample = negative_sample.cuda()
-                            # filter_bias = filter_bias.cuda()
-                            positive_sample = positive_sample.cpu()
-                            negative_sample = negative_sample.cpu()
-                            filter_bias = filter_bias.cpu()
+                            positive_sample = positive_sample.cuda()
+                            negative_sample = negative_sample.cuda()
+                            filter_bias = filter_bias.cuda()
 
                         batch_size = positive_sample.size(0)
-                        # print("批大小为："+str(batch_size))
 
                         score = model((positive_sample, negative_sample), mode)
                         score += filter_bias
@@ -455,7 +485,6 @@ class KGEModel(nn.Module):
                         step += 1
 
             metrics = {}
-            # print(logs)
             for metric in logs[0].keys():
                 metrics[metric] = sum([log[metric] for log in logs]) / len(logs)
 
