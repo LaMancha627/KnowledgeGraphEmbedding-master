@@ -78,7 +78,7 @@ class KGEModel(nn.Module):
         )
 
         self.relation_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
-        self.relation_embedding.data = self.relation_embedding.data.cuda()
+        #self.relation_embedding.data = self.relation_embedding.data.cuda()
         a = max(nrelation, path_embedding.size()[0])
         b = max(self.relation_dim, path_embedding.size()[1])
         n = torch.zeros(a, b)
@@ -266,12 +266,14 @@ class KGEModel(nn.Module):
 
         re_relation = a
         im_relation = b
+        '''
         re_relation = re_relation.cuda()
         im_relation = im_relation.cuda()
         re_head = re_head.cuda()
         im_head = im_head.cuda()
         re_tail = re_tail.cuda()
         im_tail = im_tail.cuda()
+        '''
 
         if mode == 'head-batch':
             re_score = re_relation * re_tail + im_relation * im_tail
@@ -323,9 +325,12 @@ class KGEModel(nn.Module):
         positive_sample, negative_sample, subsampling_weight, mode = next(train_iterator)
 
         if args.cuda:
-            positive_sample = positive_sample.cuda()
-            negative_sample = negative_sample.cuda()
-            subsampling_weight = subsampling_weight.cuda()
+            #positive_sample = positive_sample.cuda()
+            #negative_sample = negative_sample.cuda()
+            #subsampling_weight = subsampling_weight.cuda()
+            positive_sample = positive_sample.cpu()
+            negative_sample = negative_sample.cpu()
+            subsampling_weight = subsampling_weight.cpu()
 
         negative_score = model((positive_sample, negative_sample), mode=mode)
 
@@ -393,7 +398,8 @@ class KGEModel(nn.Module):
 
             sample = torch.LongTensor(sample)
             if args.cuda:
-                sample = sample.cuda()
+                #sample = sample.cuda()
+                sample = sample.cpu()
 
             with torch.no_grad():
                 y_score = model(sample).squeeze(1).cpu().numpy()
@@ -445,9 +451,12 @@ class KGEModel(nn.Module):
                 for test_dataset in test_dataset_list:
                     for positive_sample, negative_sample, filter_bias, mode in test_dataset:
                         if args.cuda:
-                            positive_sample = positive_sample.cuda()
-                            negative_sample = negative_sample.cuda()
-                            filter_bias = filter_bias.cuda()
+                            #positive_sample = positive_sample.cuda()
+                            #negative_sample = negative_sample.cuda()
+                            #filter_bias = filter_bias.cuda()
+                            positive_sample = positive_sample.cpu()
+                            negative_sample = negative_sample.cpu()
+                            filter_bias = filter_bias.cpu()
 
                         batch_size = positive_sample.size(0)
 
